@@ -53,3 +53,16 @@ Pull secrets from HashiCorp Vault and export them as environment variables or ou
       secret/data/myapp db_password | DB_PASSWORD
       secret/data/myapp api_key | API_KEY
 ```
+
+### [golint](./golint)
+
+Run golangci-lint on a Go project.
+
+**Usage:**
+
+```yaml
+- uses: mvaldes14/gh-actions/golint@main
+  with:
+    go-version: "1.23"
+    args: "--timeout 5m"
+```
