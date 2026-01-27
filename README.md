@@ -34,3 +34,22 @@ Send event notifications to a Gotify server.
     title: "Deploy Complete"
     message: "Deployed ${{ github.repository }} @ ${{ github.sha }}"
 ```
+
+### [vault-secrets](./vault-secrets)
+
+Pull secrets from HashiCorp Vault and export them as environment variables or outputs. Supports token, AppRole, and GitHub auth methods.
+
+**Usage:**
+
+```yaml
+- uses: mvaldes14/gh-actions/vault-secrets@main
+  id: secrets
+  with:
+    vault-url: ${{ secrets.VAULT_URL }}
+    auth-method: approle
+    role-id: ${{ secrets.VAULT_ROLE_ID }}
+    secret-id: ${{ secrets.VAULT_SECRET_ID }}
+    secrets: |
+      secret/data/myapp db_password | DB_PASSWORD
+      secret/data/myapp api_key | API_KEY
+```
