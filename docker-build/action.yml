@@ -1,0 +1,70 @@
+name: "Docker Build and Push"
+description: "Build a container image and push it to a registry"
+
+inputs:
+  registry:
+    description: "Container registry URL (e.g. ghcr.io, docker.io)"
+    required: true
+  image:
+    description: "Image name (e.g. myorg/myapp)"
+    required: true
+  tags:
+    description: "Comma-separated list of tags to apply"
+    required: false
+    default: "latest"
+  username:
+    description: "Registry username"
+    required: true
+  password:
+    description: "Registry password or token"
+    required: true
+  context:
+    description: "Build context path"
+    required: false
+    default: "."
+  dockerfile:
+    description: "Path to Dockerfile"
+    required: false
+    default: "Dockerfile"
+  build-args:
+    description: "Newline-separated list of build args (KEY=VALUE)"
+    required: false
+    default: ""
+  push:
+    description: "Push the image after building"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Log in to container registry
+      shell: bash
+      run: echo "${{ inputs.password }}" | docker login ${{ inputs.registry }} -u "${{ inputs.username }}" --password-stdin
+
+    - name: Build image
+      shell: bash
+      run: |
+        TAGS=""
+        IFS=',' read -ra TAG_ARRAY <<< "${{ inputs.tags }}"
+        for tag in "${TAG_ARRAY[@]}"; do
+          TAGS="$TAGS -t ${{ inputs.registry }}/${{ inputs.image }}:$(echo $tag | xargs)"
+        done
+
+        BUILD_ARGS=""
+        if [ -n "${{ inputs.build-args }}" ]; then
+          while IFS= read -r arg; do
+            [ -n "$arg" ] && BUILD_ARGS="$BUILD_ARGS --build-arg $arg"
+          done <<< "${{ inputs.build-args }}"
+        fi
+
+        docker build $TAGS $BUILD_ARGS -f ${{ inputs.dockerfile }} ${{ inputs.context }}
+
+    - name: Push image
+      if: inputs.push == 'true'
+      shell: bash
+      run: |
+        IFS=',' read -ra TAG_ARRAY <<< "${{ inputs.tags }}"
+        for tag in "${TAG_ARRAY[@]}"; do
+          docker push "${{ inputs.registry }}/${{ inputs.image }}:$(echo $tag | xargs)"
+        done

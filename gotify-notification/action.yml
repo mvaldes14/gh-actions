@@ -1,0 +1,33 @@
+name: "Gotify Notification"
+description: "Send a notification to a Gotify server"
+
+inputs:
+  gotify-url:
+    description: "Gotify server URL (e.g. https://gotify.example.com)"
+    required: true
+  gotify-token:
+    description: "Gotify application token"
+    required: true
+  title:
+    description: "Notification title"
+    required: false
+    default: "GitHub Actions"
+  message:
+    description: "Notification message body"
+    required: true
+  priority:
+    description: "Message priority (0-10)"
+    required: false
+    default: "5"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Send Gotify notification
+      shell: bash
+      run: |
+        curl -s -S -X POST \
+          "${{ inputs.gotify-url }}/message?token=${{ inputs.gotify-token }}" \
+          -F "title=${{ inputs.title }}" \
+          -F "message=${{ inputs.message }}" \
+          -F "priority=${{ inputs.priority }}"
