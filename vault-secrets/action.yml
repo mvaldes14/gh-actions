@@ -1,0 +1,109 @@
+name: "Vault Secrets"
+description: "Pull secrets from HashiCorp Vault and export them as outputs or environment variables"
+
+inputs:
+  vault-url:
+    description: "Vault server URL (e.g. https://vault.example.com)"
+    required: true
+  auth-method:
+    description: "Authentication method (token, approle, github)"
+    required: false
+    default: "token"
+  vault-token:
+    description: "Vault token (for token auth)"
+    required: false
+    default: ""
+  role-id:
+    description: "AppRole role ID (for approle auth)"
+    required: false
+    default: ""
+  secret-id:
+    description: "AppRole secret ID (for approle auth)"
+    required: false
+    default: ""
+  github-token:
+    description: "GitHub token (for github auth)"
+    required: false
+    default: ""
+  secrets:
+    description: |
+      Newline-separated list of secrets to fetch in the format:
+        path/to/secret key | ENV_VAR_NAME
+      Example:
+        secret/data/myapp db_password | DB_PASSWORD
+        secret/data/myapp api_key | API_KEY
+    required: true
+  export-env:
+    description: "Export secrets as environment variables for subsequent steps"
+    required: false
+    default: "true"
+
+outputs:
+  secrets-json:
+    description: "JSON object of fetched secrets (key: value pairs)"
+    value: ${{ steps.fetch.outputs.secrets-json }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Authenticate to Vault
+      id: auth
+      shell: bash
+      run: |
+        case "${{ inputs.auth-method }}" in
+          token)
+            echo "VAULT_TOKEN=${{ inputs.vault-token }}" >> "$GITHUB_ENV"
+            ;;
+          approle)
+            TOKEN=$(curl -s -X POST \
+              "${{ inputs.vault-url }}/v1/auth/approle/login" \
+              -d "{\"role_id\":\"${{ inputs.role-id }}\",\"secret_id\":\"${{ inputs.secret-id }}\"}" \
+              | jq -r '.auth.client_token')
+            echo "::add-mask::$TOKEN"
+            echo "VAULT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+            ;;
+          github)
+            TOKEN=$(curl -s -X POST \
+              "${{ inputs.vault-url }}/v1/auth/github/login" \
+              -d "{\"token\":\"${{ inputs.github-token }}\"}" \
+              | jq -r '.auth.client_token')
+            echo "::add-mask::$TOKEN"
+            echo "VAULT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+            ;;
+          *)
+            echo "::error::Unsupported auth method: ${{ inputs.auth-method }}"
+            exit 1
+            ;;
+        esac
+
+    - name: Fetch secrets
+      id: fetch
+      shell: bash
+      run: |
+        JSON="{}"
+
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+
+          path_key=$(echo "$line" | cut -d'|' -f1 | xargs)
+          env_name=$(echo "$line" | cut -d'|' -f2 | xargs)
+          secret_path=$(echo "$path_key" | rsed 's/ [^ ]*$//' | xargs)
+          secret_key=$(echo "$path_key" | awk '{print $NF}')
+
+          value=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+            "${{ inputs.vault-url }}/v1/${secret_path}" \
+            | jq -r ".data.data.${secret_key} // .data.${secret_key}")
+
+          echo "::add-mask::$value"
+
+          JSON=$(echo "$JSON" | jq --arg k "$env_name" --arg v "$value" '. + {($k): $v}')
+
+          if [ "${{ inputs.export-env }}" = "true" ]; then
+            echo "${env_name}=${value}" >> "$GITHUB_ENV"
+          fi
+
+          echo "${env_name}=${value}" >> "$GITHUB_OUTPUT"
+
+        done <<< "${{ inputs.secrets }}"
+
+        echo "secrets-json=$(echo "$JSON" | jq -c .)" >> "$GITHUB_OUTPUT"
