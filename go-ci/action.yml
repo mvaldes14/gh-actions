@@ -1,0 +1,110 @@
+name: "Go CI"
+description: "Vet, build and test a Go project with module and build caching"
+
+inputs:
+  go-version:
+    description: "Go version to use. Prefer go-version-file so the toolchain tracks go.mod."
+    required: false
+    default: ""
+  go-version-file:
+    description: "Path to a go.mod or .go-version file to read the version from"
+    required: false
+    default: "go.mod"
+  working-directory:
+    description: "Directory containing the Go module"
+    required: false
+    default: "."
+  race:
+    description: "Run tests with the race detector"
+    required: false
+    default: "true"
+  coverage:
+    description: "Write a coverage profile to the path given by coverage-out"
+    required: false
+    default: "true"
+  coverage-out:
+    description: "Coverage profile output path, relative to working-directory"
+    required: false
+    default: "coverage.out"
+  test-args:
+    description: "Extra arguments appended to go test"
+    required: false
+    default: ""
+  packages:
+    description: "Package pattern to vet, build and test"
+    required: false
+    default: "./..."
+  cache-dependency-path:
+    description: "File whose hash keys the module cache, relative to working-directory. Defaults to go.mod rather than go.sum because setup-go fails outright when the path does not resolve, and a module with no external deps has no go.sum."
+    required: false
+    default: "go.mod"
+
+outputs:
+  coverage-file:
+    description: "Path to the coverage profile, empty when coverage is disabled"
+    value: ${{ steps.test.outputs.coverage-file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        # go-version wins when set; otherwise the version is read from go.mod so
+        # CI cannot drift from the module's declared toolchain.
+        go-version: ${{ inputs.go-version }}
+        go-version-file: ${{ inputs.go-version == '' && format('{0}/{1}', inputs.working-directory, inputs.go-version-file) || '' }}
+        cache-dependency-path: ${{ inputs.working-directory }}/${{ inputs.cache-dependency-path }}
+
+    - name: Download modules
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: go mod download
+
+    - name: Verify go.mod and go.sum are tidy
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        go mod tidy
+        if ! git diff --quiet -- go.mod go.sum; then
+          echo "::error::go.mod/go.sum are not tidy. Run 'go mod tidy' and commit the result."
+          git diff -- go.mod go.sum
+          exit 1
+        fi
+
+    - name: Vet
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: go vet ${{ inputs.packages }}
+
+    - name: Build
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: go build ${{ inputs.packages }}
+
+    - name: Test
+      id: test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        FLAGS=""
+        [ "${{ inputs.race }}" = "true" ] && FLAGS="$FLAGS -race"
+        if [ "${{ inputs.coverage }}" = "true" ]; then
+          FLAGS="$FLAGS -coverprofile=${{ inputs.coverage-out }} -covermode=atomic"
+          echo "coverage-file=${{ inputs.working-directory }}/${{ inputs.coverage-out }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "coverage-file=" >> "$GITHUB_OUTPUT"
+        fi
+        go test $FLAGS ${{ inputs.test-args }} ${{ inputs.packages }}
+
+    - name: Coverage summary
+      if: inputs.coverage == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        {
+          echo "### Coverage"
+          echo '```'
+          go tool cover -func="${{ inputs.coverage-out }}" | tail -n 1
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"

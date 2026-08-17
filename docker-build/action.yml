@@ -1,20 +1,18 @@
 name: "Docker Build and Push"
-description: "Build a container image and push it to a registry"
+description: "Build a container image with Buildx and push it to a registry"
 
 inputs:
   registry:
-    description: "Container registry URL (e.g. ghcr.io, docker.io)"
-    required: true
-  image:
-    description: "Image name (e.g. myorg/myapp)"
-    required: true
-  tags:
-    description: "Comma-separated list of tags to apply"
+    description: "Container registry host (e.g. ghcr.io, docker.io)"
     required: false
-    default: "latest"
+    default: "ghcr.io"
+  image:
+    description: "Image name without the registry host (e.g. mvaldes14/task-manager)"
+    required: true
   username:
     description: "Registry username"
-    required: true
+    required: false
+    default: ${{ github.actor }}
   password:
     description: "Registry password or token"
     required: true
@@ -23,48 +21,104 @@ inputs:
     required: false
     default: "."
   dockerfile:
-    description: "Path to Dockerfile"
+    description: "Path to the Dockerfile, relative to the workspace"
     required: false
     default: "Dockerfile"
+  platforms:
+    description: "Comma-separated build platforms. Multi-arch builds in a single job are slow; for more than one platform prefer the docker-multiarch reusable workflow."
+    required: false
+    default: "linux/amd64"
+  tags:
+    description: "docker/metadata-action tag spec, one directive per line. For a literal tag use `type=raw,value=my-tag`."
+    required: false
+    default: |
+      type=ref,event=branch
+      type=ref,event=pr
+      type=ref,event=tag
+      type=sha,format=short
+      type=raw,value=latest,enable={{is_default_branch}}
+  labels:
+    description: "Extra OCI labels, one KEY=VALUE per line. Merged with the labels metadata-action derives."
+    required: false
+    default: ""
   build-args:
-    description: "Newline-separated list of build args (KEY=VALUE)"
+    description: "Build args, one KEY=VALUE per line"
+    required: false
+    default: ""
+  target:
+    description: "Dockerfile stage to build (multi-stage builds)"
     required: false
     default: ""
   push:
-    description: "Push the image after building"
+    description: "Push the image after building. Set to false on pull_request builds."
     required: false
     default: "true"
+  cache-scope:
+    description: "GitHub Actions cache scope. Give each image its own scope so they do not evict each other."
+    required: false
+    default: ${{ github.workflow }}
+  provenance:
+    description: "Emit SLSA provenance attestation. Off by default because it creates an extra manifest entry that some registries and runtimes mishandle."
+    required: false
+    default: "false"
+
+outputs:
+  digest:
+    description: "Image digest of the pushed image"
+    value: ${{ steps.build.outputs.digest }}
+  image-id:
+    description: "Image ID of the built image"
+    value: ${{ steps.build.outputs.imageid }}
+  tags:
+    description: "Newline-separated list of fully qualified tags that were applied"
+    value: ${{ steps.meta.outputs.tags }}
+  version:
+    description: "Primary version metadata-action derived for this build"
+    value: ${{ steps.meta.outputs.version }}
+  labels:
+    description: "Newline-separated list of labels that were applied"
+    value: ${{ steps.meta.outputs.labels }}
 
 runs:
   using: "composite"
   steps:
-    - name: Log in to container registry
-      shell: bash
-      run: echo "${{ inputs.password }}" | docker login ${{ inputs.registry }} -u "${{ inputs.username }}" --password-stdin
+    - name: Set up QEMU
+      # Only needed when building for an architecture the runner is not.
+      if: contains(inputs.platforms, 'arm') || contains(inputs.platforms, 'ppc') || contains(inputs.platforms, 's390')
+      uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
-    - name: Build image
-      shell: bash
-      run: |
-        TAGS=""
-        IFS=',' read -ra TAG_ARRAY <<< "${{ inputs.tags }}"
-        for tag in "${TAG_ARRAY[@]}"; do
-          TAGS="$TAGS -t ${{ inputs.registry }}/${{ inputs.image }}:$(echo $tag | xargs)"
-        done
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-        BUILD_ARGS=""
-        if [ -n "${{ inputs.build-args }}" ]; then
-          while IFS= read -r arg; do
-            [ -n "$arg" ] && BUILD_ARGS="$BUILD_ARGS --build-arg $arg"
-          done <<< "${{ inputs.build-args }}"
-        fi
-
-        docker build $TAGS $BUILD_ARGS -f ${{ inputs.dockerfile }} ${{ inputs.context }}
-
-    - name: Push image
+    - name: Log in to ${{ inputs.registry }}
       if: inputs.push == 'true'
-      shell: bash
-      run: |
-        IFS=',' read -ra TAG_ARRAY <<< "${{ inputs.tags }}"
-        for tag in "${TAG_ARRAY[@]}"; do
-          docker push "${{ inputs.registry }}/${{ inputs.image }}:$(echo $tag | xargs)"
-        done
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+      with:
+        images: ${{ inputs.registry }}/${{ inputs.image }}
+        tags: ${{ inputs.tags }}
+        labels: ${{ inputs.labels }}
+
+    - name: Build and push
+      id: build
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.dockerfile }}
+        platforms: ${{ inputs.platforms }}
+        target: ${{ inputs.target }}
+        push: ${{ inputs.push }}
+        load: ${{ inputs.push == 'false' && !contains(inputs.platforms, ',') }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: ${{ inputs.build-args }}
+        provenance: ${{ inputs.provenance }}
+        cache-from: type=gha,scope=${{ inputs.cache-scope }}
+        cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope }}

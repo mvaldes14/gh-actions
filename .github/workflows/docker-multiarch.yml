@@ -1,0 +1,198 @@
+# Reusable workflow: build a real multi-arch manifest.
+#
+# Each platform builds on its own runner and is pushed by digest only, then a
+# merge job stitches the digests into one tagged manifest list. This is why it
+# exists: `platforms: linux/amd64,linux/arm64` in a single job emulates the
+# foreign architecture under QEMU and serialises the builds, which for anything
+# that compiles is several times slower.
+#
+# The caller must grant `packages: write` on the job.
+name: Docker Multi-Arch Build
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Image name without the registry host. Defaults to <owner>/<repo>."
+        type: string
+        required: false
+        default: ""
+      registry:
+        type: string
+        required: false
+        default: "ghcr.io"
+      platforms:
+        description: 'JSON array of platforms, e.g. ["linux/amd64","linux/arm64"]'
+        type: string
+        required: false
+        default: '["linux/amd64","linux/arm64"]'
+      context:
+        type: string
+        required: false
+        default: "."
+      dockerfile:
+        type: string
+        required: false
+        default: "Dockerfile"
+      build-args:
+        type: string
+        required: false
+        default: ""
+      target:
+        type: string
+        required: false
+        default: ""
+      tags:
+        description: "docker/metadata-action tag spec, one directive per line"
+        type: string
+        required: false
+        default: |
+          type=ref,event=branch
+          type=ref,event=tag
+          type=sha,format=short
+          type=raw,value=latest,enable={{is_default_branch}}
+      runs-on:
+        type: string
+        required: false
+        default: "ubuntu-latest"
+    secrets:
+      registry-username:
+        required: false
+      registry-password:
+        required: false
+    outputs:
+      tags:
+        description: "Tags applied to the manifest list"
+        value: ${{ jobs.merge.outputs.tags }}
+      version:
+        description: "Primary version metadata-action derived"
+        value: ${{ jobs.merge.outputs.version }}
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }})
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(inputs.platforms) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve names
+        id: names
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          IMAGE: ${{ inputs.image != '' && inputs.image || github.repository }}
+        run: |
+          # linux/arm64 -> linux-arm64, usable as an artifact name and cache scope
+          echo "platform-pair=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+          echo "image=${{ inputs.registry }}/${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        if: contains(matrix.platform, 'arm') || contains(matrix.platform, 'ppc') || contains(matrix.platform, 's390')
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to ${{ inputs.registry }}
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.names.outputs.image }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          target: ${{ inputs.target }}
+          build-args: ${{ inputs.build-args }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # No tags here on purpose: tags are applied once, to the manifest list.
+          outputs: type=image,name=${{ steps.names.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ steps.names.outputs.platform-pair }}
+          cache-to: type=gha,mode=max,scope=${{ steps.names.outputs.platform-pair }}
+
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ steps.names.outputs.platform-pair }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: build
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Resolve image name
+        id: names
+        env:
+          IMAGE: ${{ inputs.image != '' && inputs.image || github.repository }}
+        run: echo "image=${{ inputs.registry }}/${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to ${{ inputs.registry }}
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.names.outputs.image }}
+          tags: ${{ inputs.tags }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "${IMAGE}@sha256:%s " *)
+
+      - name: Inspect manifest
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: docker buildx imagetools inspect "${IMAGE}:${VERSION}"

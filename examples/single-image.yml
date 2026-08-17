@@ -1,0 +1,22 @@
+# Drop-in replacement for task-manager/.github/workflows/docker.yml and
+# task-manager-mcp/.github/workflows/build.yml, which are currently identical
+# to each other apart from the image name.
+#
+# Copy to <repo>/.github/workflows/build.yml and set `image`.
+name: Build & Push
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  image:
+    permissions:
+      contents: read
+      packages: write
+    uses: mvaldes14/gh-actions/.github/workflows/docker-multiarch.yml@main
+    with:
+      image: mvaldes14/task-manager-mcp
+      platforms: '["linux/amd64","linux/arm64"]'

@@ -1,0 +1,87 @@
+# Reusable workflow: lint and test a Go module.
+#
+# Lint and test run as separate jobs so a formatting nit does not hide a real
+# test failure, and so the two show up as distinct required checks.
+name: Go CI
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: "Go version. Leave empty to read it from go.mod."
+        type: string
+        required: false
+        default: ""
+      working-directory:
+        description: "Directory containing the Go module"
+        type: string
+        required: false
+        default: "."
+      packages:
+        type: string
+        required: false
+        default: "./..."
+      race:
+        type: boolean
+        required: false
+        default: true
+      coverage:
+        type: boolean
+        required: false
+        default: true
+      test-args:
+        type: string
+        required: false
+        default: ""
+      lint:
+        description: "Run golangci-lint"
+        type: boolean
+        required: false
+        default: true
+      lint-args:
+        type: string
+        required: false
+        default: ""
+      lint-config:
+        description: "Path to a golangci-lint config file"
+        type: string
+        required: false
+        default: ""
+      runs-on:
+        type: string
+        required: false
+        default: "ubuntu-latest"
+
+jobs:
+  test:
+    name: test
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: mvaldes14/gh-actions/go-ci@main
+        with:
+          go-version: ${{ inputs.go-version }}
+          working-directory: ${{ inputs.working-directory }}
+          packages: ${{ inputs.packages }}
+          race: ${{ inputs.race }}
+          coverage: ${{ inputs.coverage }}
+          test-args: ${{ inputs.test-args }}
+
+  lint:
+    name: lint
+    if: inputs.lint
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: mvaldes14/gh-actions/golint@main
+        with:
+          go-version: ${{ inputs.go-version != '' && inputs.go-version || 'stable' }}
+          working-directory: ${{ inputs.working-directory }}
+          args: ${{ inputs.lint-args }}
+          config: ${{ inputs.lint-config }}
