@@ -1,0 +1,17 @@
+# New coverage rather than consolidation: task-manager-mcp, k8s-lsp and
+# homelab-tf-provider are Go repos with no test CI at all today.
+#
+# Copy to <repo>/.github/workflows/ci.yml.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    permissions:
+      contents: read
+    uses: mvaldes14/gh-actions/.github/workflows/go-ci.yml@main
+    # Version comes from go.mod by default; override only to test a second toolchain.

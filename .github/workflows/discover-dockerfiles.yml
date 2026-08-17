@@ -1,0 +1,66 @@
+# Reusable workflow: find every directory in the repo that holds a Dockerfile
+# and emit it as a JSON array suitable for `strategy.matrix`.
+#
+# For monorepos where each folder is its own image (chi, k8s-apps, LFS148-code)
+# this replaces a hand-maintained matrix that silently goes stale when someone
+# adds a project.
+name: Discover Dockerfiles
+
+on:
+  workflow_call:
+    inputs:
+      max-depth:
+        description: "How deep to search for Dockerfiles"
+        type: number
+        required: false
+        default: 3
+      dockerfile-name:
+        description: "Filename to search for"
+        type: string
+        required: false
+        default: "Dockerfile"
+      exclude:
+        description: "Extended regex of paths to drop, matched against the directory path. A repo-root Dockerfile is reported as `.`, so the default requires a character after the dot in order to skip .devcontainer/.github without also skipping the root."
+        type: string
+        required: false
+        default: '(^|/)(\.[^/]+|node_modules|vendor|dist|archive)(/|$)'
+      runs-on:
+        type: string
+        required: false
+        default: "ubuntu-latest"
+    outputs:
+      dirs:
+        description: 'JSON array of directories containing a Dockerfile, e.g. ["quinela","taekwondo"]'
+        value: ${{ jobs.discover.outputs.dirs }}
+      count:
+        description: "Number of directories found"
+        value: ${{ jobs.discover.outputs.count }}
+
+jobs:
+  discover:
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      dirs: ${{ steps.find.outputs.dirs }}
+      count: ${{ steps.find.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Find directories with a Dockerfile
+        id: find
+        env:
+          MAX_DEPTH: ${{ inputs.max-depth }}
+          NAME: ${{ inputs.dockerfile-name }}
+          EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          # `grep -v` exits 1 when everything is filtered out, which under
+          # `set -e` would fail the job rather than report an empty matrix.
+          dirs=$(find . -maxdepth "$MAX_DEPTH" -name "$NAME" -not -path './.git/*' -exec dirname {} \; \
+            | sed 's|^\./||' \
+            | { grep -Ev "$EXCLUDE" || true; } \
+            | sort -u \
+            | jq -R . | jq -cs .)
+          count=$(jq 'length' <<< "$dirs")
+          echo "dirs=$dirs" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Found $count project(s): $dirs" >> "$GITHUB_STEP_SUMMARY"

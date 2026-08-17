@@ -1,0 +1,22 @@
+# Every third-party action here is pinned to a commit SHA, which is the only
+# ref an attacker cannot move. The tradeoff is that SHAs do not update
+# themselves — this is what keeps them fresh. Dependabot reads both
+# .github/workflows/*.yml and the composite action.yml files.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      # One PR for the docker/* family; they are released together and are
+      # tedious to review one at a time.
+      docker:
+        patterns:
+          - "docker/*"
+      actions:
+        patterns:
+          - "actions/*"

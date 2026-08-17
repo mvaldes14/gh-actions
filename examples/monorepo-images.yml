@@ -1,0 +1,35 @@
+# Drop-in replacement for chi/.github/workflows/build-images.yml — the hand-rolled
+# discover + build matrix, with the discovery half factored out.
+#
+# Copy to <repo>/.github/workflows/build-images.yml.
+name: Build Images
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  discover:
+    uses: mvaldes14/gh-actions/.github/workflows/discover-dockerfiles.yml@main
+
+  build:
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJson(needs.discover.outputs.dirs) }}
+    permissions:
+      contents: read
+      packages: write
+    uses: mvaldes14/gh-actions/.github/workflows/docker-build-push.yml@main
+    with:
+      # A nested dir becomes a nested image path (k8s/foo -> ghcr.io/<owner>/k8s/foo).
+      # GHCR accepts that; Docker Hub does not, so flatten the name if you
+      # retarget this at docker.io.
+      image: ${{ github.repository_owner }}/${{ matrix.dir }}
+      context: ./${{ matrix.dir }}
+      dockerfile: ./${{ matrix.dir }}/Dockerfile
+      cache-scope: ${{ matrix.dir }}
