@@ -64,6 +64,21 @@ jobs:
     uses: mvaldes14/gh-actions/.github/workflows/go-ci.yml@main
 ```
 
+### [lua-ci](./.github/workflows/lua-ci.yml)
+
+Check formatting with StyLua and run LuaCheck. Repositories should keep
+`stylua.toml` and `.luacheckrc` at their root. See
+[`examples/lua-repo.yml`](./examples/lua-repo.yml).
+
+```yaml
+jobs:
+  lua:
+    uses: mvaldes14/gh-actions/.github/workflows/lua-ci.yml@main
+```
+
+Tool versions are pinned by workflow defaults and can be overridden when a
+repository needs a different Lua, LuaRocks, LuaCheck, or StyLua version.
+
 ## Actions
 
 ### [docker-build](./docker-build)
