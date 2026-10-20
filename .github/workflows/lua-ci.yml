@@ -1,0 +1,69 @@
+# Reusable workflow: enforce Lua formatting and static analysis.
+name: Lua CI
+
+on:
+  workflow_call:
+    inputs:
+      lua-version:
+        description: "Lua version used to run LuaCheck"
+        type: string
+        required: false
+        default: "5.1"
+      luarocks-version:
+        description: "LuaRocks version used to install LuaCheck"
+        type: string
+        required: false
+        default: "3.13.0"
+      luacheck-version:
+        description: "LuaCheck rock version"
+        type: string
+        required: false
+        default: "1.2.0-1"
+      stylua-version:
+        description: "StyLua release version"
+        type: string
+        required: false
+        default: "2.6.0"
+      working-directory:
+        description: "Directory containing stylua.toml and .luacheckrc"
+        type: string
+        required: false
+        default: "."
+      runs-on:
+        description: "GitHub-hosted runner label"
+        type: string
+        required: false
+        default: "ubuntu-latest"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check formatting
+        uses: JohnnyMorganz/stylua-action@76fd70c03e6340ceaf673366712db9b20560b402 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ inputs.stylua-version }}
+          args: --check ${{ inputs.working-directory }}
+
+      - name: Set up Lua
+        uses: leafo/gh-actions-lua@6919171ccf181b826f44b9bca76307b577217377 # v13.0.0
+        with:
+          luaVersion: ${{ inputs.lua-version }}
+
+      - name: Set up LuaRocks
+        uses: leafo/gh-actions-luarocks@35d062def313a7699a0d513e996bcf4352f05389 # v6.1.0
+        with:
+          luaRocksVersion: ${{ inputs.luarocks-version }}
+
+      - name: Install LuaCheck
+        run: luarocks install luacheck "${{ inputs.luacheck-version }}"
+
+      - name: Run LuaCheck
+        working-directory: ${{ inputs.working-directory }}
+        run: luacheck .
