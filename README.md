@@ -79,6 +79,27 @@ jobs:
 Tool versions are pinned by workflow defaults and can be overridden when a
 repository needs a different Lua, LuaRocks, LuaCheck, or StyLua version.
 
+### [pr-agent](./.github/workflows/pr-agent.yml)
+
+Run [PR-Agent](https://docs.pr-agent.ai/installation/github/) on pull requests
+and issue comments. Copy [`examples/pr-agent.yml`](./examples/pr-agent.yml) to
+the consuming repository. The caller must define an `OPENAI_KEY` Actions
+secret; the reusable workflow receives it explicitly and never stores it here.
+`pull_request_target` is intentional: PR-Agent reads the PR through the GitHub
+API and does not check out or execute fork code.
+
+```yaml
+jobs:
+  pr-agent:
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: mvaldes14/gh-actions/.github/workflows/pr-agent.yml@main
+    secrets:
+      OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+```
+
 ## Actions
 
 ### [docker-build](./docker-build)

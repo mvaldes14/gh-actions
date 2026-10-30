@@ -1,0 +1,30 @@
+# Reusable PR-Agent workflow.
+# The caller must trigger this workflow on pull_request_target and issue_comment.
+name: PR Agent
+
+on:
+  workflow_call:
+    secrets:
+      OPENAI_KEY:
+        description: "OpenAI API key used by PR-Agent"
+        required: true
+
+jobs:
+  pr-agent:
+    name: Review pull requests with PR-Agent
+    # Ignore bot comments and only handle issue_comment events for PRs.
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      (github.event_name == 'pull_request_target' || github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Run PR-Agent
+        uses: the-pr-agent/pr-agent@584297340d05e04c42cb4bca3bf56de17607670e # main
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize", "review_requested"]'
