@@ -5,8 +5,8 @@ name: PR Agent
 on:
   workflow_call:
     secrets:
-      OPENAI_KEY:
-        description: "OpenAI API key used by PR-Agent"
+      BEDROCK_API_KEY:
+        description: "Amazon Bedrock API key used by PR-Agent"
         required: true
 
 jobs:
@@ -25,6 +25,9 @@ jobs:
       - name: Run PR-Agent
         uses: the-pr-agent/pr-agent@584297340d05e04c42cb4bca3bf56de17607670e # main
         env:
-          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.BEDROCK_API_KEY }}
+          AWS_REGION_NAME: us-east-1
           GITHUB_TOKEN: ${{ github.token }}
+          config.model: "bedrock/us.anthropic.claude-sonnet-4-6"
+          config.fallback_models: '[]'
           github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize", "review_requested"]'

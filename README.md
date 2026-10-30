@@ -83,7 +83,7 @@ repository needs a different Lua, LuaRocks, LuaCheck, or StyLua version.
 
 Run [PR-Agent](https://docs.pr-agent.ai/installation/github/) on pull requests
 and issue comments. Copy [`examples/pr-agent.yml`](./examples/pr-agent.yml) to
-the consuming repository. The caller must define an `OPENAI_KEY` Actions
+the consuming repository. The caller must define a `BEDROCK_API_KEY` Actions
 secret; the reusable workflow receives it explicitly and never stores it here.
 `pull_request_target` is intentional: PR-Agent reads the PR through the GitHub
 API and does not check out or execute fork code.
@@ -97,7 +97,7 @@ jobs:
       pull-requests: write
     uses: mvaldes14/gh-actions/.github/workflows/pr-agent.yml@main
     secrets:
-      OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+      BEDROCK_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
 ```
 
 ## Actions
