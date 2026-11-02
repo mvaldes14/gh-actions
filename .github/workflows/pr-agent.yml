@@ -12,10 +12,20 @@ on:
 jobs:
   pr-agent:
     name: Review pull requests with PR-Agent
-    # Ignore bot comments and only handle issue_comment events for PRs.
+    # Ignore bot-triggered events, non-PR comments, and Renovate-authored PRs.
     if: >-
       github.event.sender.type != 'Bot' &&
-      (github.event_name == 'pull_request_target' || github.event.issue.pull_request)
+      (
+        (
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.user.login != 'renovate[bot]'
+        ) ||
+        (
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
+          github.event.issue.user.login != 'renovate[bot]'
+        )
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -28,6 +38,6 @@ jobs:
           AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.BEDROCK_API_KEY }}
           AWS_REGION_NAME: us-east-1
           GITHUB_TOKEN: ${{ github.token }}
-          config.model: "bedrock/us.anthropic.claude-sonnet-4-6"
+          config.model: "bedrock/qwen.qwen3-coder-next"
           config.fallback_models: '[]'
           github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize", "review_requested"]'
