@@ -18,7 +18,8 @@ jobs:
       (
         (
           github.event_name == 'pull_request_target' &&
-          github.event.pull_request.user.login != 'renovate[bot]'
+          github.event.pull_request.user.login != 'renovate[bot]' &&
+          !startsWith(github.event.pull_request.head.ref, 'renovate/')
         ) ||
         (
           github.event_name == 'issue_comment' &&
@@ -32,7 +33,22 @@ jobs:
       issues: write
       pull-requests: write
     steps:
+      - name: Check commented PR branch
+        if: github.event_name == 'issue_comment'
+        id: commented-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          head_ref=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.ref')
+          if [[ "$head_ref" == renovate/* ]]; then
+            echo "is-renovate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is-renovate=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run PR-Agent
+        if: github.event_name != 'issue_comment' || steps.commented-pr.outputs.is-renovate != 'true'
         uses: the-pr-agent/pr-agent@584297340d05e04c42cb4bca3bf56de17607670e # main
         env:
           AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.BEDROCK_API_KEY }}
