@@ -58,7 +58,11 @@ inputs:
     required: false
     default: ${{ github.workflow }}
   provenance:
-    description: "Emit SLSA provenance attestation. Off by default because it creates an extra manifest entry that some registries and runtimes mishandle."
+    description: "Emit SLSA provenance attestation."
+    required: false
+    default: "false"
+  sbom:
+    description: "Emit SBOM attestation."
     required: false
     default: "false"
 
@@ -120,5 +124,6 @@ runs:
         labels: ${{ steps.meta.outputs.labels }}
         build-args: ${{ inputs.build-args }}
         provenance: ${{ inputs.provenance }}
+        sbom: ${{ inputs.sbom }}
         cache-from: type=gha,scope=${{ inputs.cache-scope }}
         cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope }}

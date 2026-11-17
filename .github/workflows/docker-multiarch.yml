@@ -55,6 +55,14 @@ on:
         type: string
         required: false
         default: "ubuntu-latest"
+      provenance:
+        type: boolean
+        required: false
+        default: false
+      sbom:
+        type: boolean
+        required: false
+        default: false
     secrets:
       registry-username:
         required: false
@@ -72,6 +80,7 @@ jobs:
   build:
     name: build (${{ matrix.platform }})
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -122,10 +131,12 @@ jobs:
           target: ${{ inputs.target }}
           build-args: ${{ inputs.build-args }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: ${{ inputs.provenance }}
+          sbom: ${{ inputs.sbom }}
           # No tags here on purpose: tags are applied once, to the manifest list.
           outputs: type=image,name=${{ steps.names.outputs.image }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ steps.names.outputs.platform-pair }}
-          cache-to: type=gha,mode=max,scope=${{ steps.names.outputs.platform-pair }}
+          cache-from: type=gha,scope=${{ steps.names.outputs.image }}-${{ steps.names.outputs.platform-pair }}
+          cache-to: type=gha,mode=max,scope=${{ steps.names.outputs.image }}-${{ steps.names.outputs.platform-pair }}
 
       - name: Export digest
         env:
@@ -145,6 +156,7 @@ jobs:
   merge:
     needs: build
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
@@ -187,9 +199,16 @@ jobs:
         env:
           IMAGE: ${{ steps.names.outputs.image }}
         run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "${IMAGE}@sha256:%s " *)
+          mapfile -t tags < <(jq -cr '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          tag_args=()
+          for tag in "${tags[@]}"; do
+            tag_args+=(-t "$tag")
+          done
+          digest_args=()
+          for digest in *; do
+            digest_args+=("$IMAGE@sha256:$digest")
+          done
+          docker buildx imagetools create "${tag_args[@]}" "${digest_args[@]}"
 
       - name: Inspect manifest
         env:

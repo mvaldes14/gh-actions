@@ -1,0 +1,26 @@
+name: Container images
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  discover:
+    uses: mvaldes14/gh-actions/.github/workflows/discover-dockerfiles.yml@v1
+
+  build:
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      matrix:
+        directory: ${{ fromJSON(needs.discover.outputs.dirs) }}
+    permissions:
+      contents: read
+      packages: write
+    uses: mvaldes14/gh-actions/.github/workflows/docker-build-push.yml@v1
+    with:
+      context: ${{ matrix.directory }}
+      image: ${{ github.repository }}/${{ matrix.directory }}

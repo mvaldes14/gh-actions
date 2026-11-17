@@ -8,6 +8,8 @@
 # workflow can only downscope the GITHUB_TOKEN it is handed, never widen it.
 name: Docker Build and Push
 
+permissions: {}
+
 on:
   workflow_call:
     inputs:
@@ -63,6 +65,14 @@ on:
         type: string
         required: false
         default: ""
+      provenance:
+        type: boolean
+        required: false
+        default: false
+      sbom:
+        type: boolean
+        required: false
+        default: false
     secrets:
       registry-username:
         description: "Registry username. Defaults to github.actor, which is correct for ghcr.io."
@@ -84,6 +94,7 @@ on:
 jobs:
   build:
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -111,5 +122,7 @@ jobs:
           build-args: ${{ inputs.build-args }}
           # Never push from a fork PR: the token is read-only there anyway.
           push: ${{ inputs.push && github.event_name != 'pull_request' }}
-          cache-scope: ${{ inputs.cache-scope != '' && inputs.cache-scope || inputs.context }}
+          cache-scope: ${{ inputs.cache-scope != '' && inputs.cache-scope || inputs.image != '' && inputs.image || github.repository }}
+          provenance: ${{ inputs.provenance }}
+          sbom: ${{ inputs.sbom }}
           tags: ${{ inputs.tags }}

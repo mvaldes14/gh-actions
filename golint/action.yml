@@ -27,23 +27,30 @@ runs:
   using: "composite"
   steps:
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version: ${{ inputs.go-version }}
 
     - name: Install golangci-lint
       shell: bash
       run: |
-        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-          | sh -s -- -b "$(go env GOPATH)/bin" ${{ inputs.version }}
+        set -euo pipefail
+        version="${{ inputs.version }}"
+        curl --fail-with-body --silent --show-error --retry 3 \
+          "https://raw.githubusercontent.com/golangci/golangci-lint/${version}/install.sh" \
+          | sh -s -- -b "$(go env GOPATH)/bin" "$version"
 
     - name: Run golangci-lint
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        LINT_CONFIG: ${{ inputs.config }}
+        LINT_ARGS: ${{ inputs.args }}
       run: |
-        CONFIG_FLAG=""
-        if [ -n "${{ inputs.config }}" ]; then
-          CONFIG_FLAG="--config ${{ inputs.config }}"
-        fi
-
-        "$(go env GOPATH)/bin/golangci-lint" run $CONFIG_FLAG ${{ inputs.args }}
+        set -euo pipefail
+        args=(run)
+        [[ -n "$LINT_CONFIG" ]] && args+=(--config "$LINT_CONFIG")
+        # args remains intentionally shell-like for backwards compatibility.
+        read -r -a extra_args <<< "$LINT_ARGS"
+        args+=("${extra_args[@]}")
+        "$(go env GOPATH)/bin/golangci-lint" "${args[@]}"
