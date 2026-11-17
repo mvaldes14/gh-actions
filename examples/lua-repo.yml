@@ -1,0 +1,11 @@
+name: Lua CI
+
+on:
+  push:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  lint:
+    uses: mvaldes14/gh-actions/.github/workflows/lua-ci.yml@v1

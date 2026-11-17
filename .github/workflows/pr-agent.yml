@@ -2,6 +2,12 @@
 # The caller must trigger this workflow on pull_request_target and issue_comment.
 name: PR Agent
 
+permissions: {}
+
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_call:
     secrets:
@@ -28,6 +34,7 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write

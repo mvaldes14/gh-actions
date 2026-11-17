@@ -5,6 +5,10 @@ inputs:
   vault-url:
     description: "Vault server URL (e.g. https://vault.example.com)"
     required: true
+  vault-namespace:
+    description: "Optional Vault namespace"
+    required: false
+    default: ""
   auth-method:
     description: "Authentication method (token, approle, github)"
     required: false
@@ -29,14 +33,15 @@ inputs:
     description: |
       Newline-separated list of secrets to fetch in the format:
         path/to/secret key | ENV_VAR_NAME
-      Example:
-        secret/data/myapp db_password | DB_PASSWORD
-        secret/data/myapp api_key | API_KEY
     required: true
   export-env:
     description: "Export secrets as environment variables for subsequent steps"
     required: false
     default: "true"
+  export-outputs:
+    description: "Export individual secrets as step outputs"
+    required: false
+    default: "false"
 
 outputs:
   secrets-json:
@@ -49,61 +54,106 @@ runs:
     - name: Authenticate to Vault
       id: auth
       shell: bash
+      env:
+        AUTH_METHOD: ${{ inputs.auth-method }}
+        VAULT_URL: ${{ inputs.vault-url }}
+        VAULT_NAMESPACE: ${{ inputs.vault-namespace }}
+        VAULT_TOKEN_INPUT: ${{ inputs.vault-token }}
+        ROLE_ID: ${{ inputs.role-id }}
+        SECRET_ID: ${{ inputs.secret-id }}
+        GITHUB_TOKEN_INPUT: ${{ inputs.github-token }}
       run: |
-        case "${{ inputs.auth-method }}" in
+        set -euo pipefail
+        : "${VAULT_URL:?vault-url is required}"
+        auth_headers=()
+        [[ -n "$VAULT_NAMESPACE" ]] && auth_headers+=(--header "X-Vault-Namespace: $VAULT_NAMESPACE")
+
+        case "$AUTH_METHOD" in
           token)
-            echo "VAULT_TOKEN=${{ inputs.vault-token }}" >> "$GITHUB_ENV"
+            [[ -n "$VAULT_TOKEN_INPUT" ]] || { echo "::error::vault-token is required for token auth"; exit 1; }
+            token="$VAULT_TOKEN_INPUT"
             ;;
           approle)
-            TOKEN=$(curl -s -X POST \
-              "${{ inputs.vault-url }}/v1/auth/approle/login" \
-              -d "{\"role_id\":\"${{ inputs.role-id }}\",\"secret_id\":\"${{ inputs.secret-id }}\"}" \
-              | jq -r '.auth.client_token')
-            echo "::add-mask::$TOKEN"
-            echo "VAULT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+            [[ -n "$ROLE_ID" && -n "$SECRET_ID" ]] || { echo "::error::role-id and secret-id are required for approle auth"; exit 1; }
+            token=$(curl --fail-with-body --silent --show-error --retry 3 "${auth_headers[@]}" \
+              --request POST "$VAULT_URL/v1/auth/approle/login" \
+              --data "$(jq -cn --arg role_id "$ROLE_ID" --arg secret_id "$SECRET_ID" '{role_id:$role_id,secret_id:$secret_id}')" \
+              | jq --exit-status -r '.auth.client_token')
             ;;
           github)
-            TOKEN=$(curl -s -X POST \
-              "${{ inputs.vault-url }}/v1/auth/github/login" \
-              -d "{\"token\":\"${{ inputs.github-token }}\"}" \
-              | jq -r '.auth.client_token')
-            echo "::add-mask::$TOKEN"
-            echo "VAULT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+            [[ -n "$GITHUB_TOKEN_INPUT" ]] || { echo "::error::github-token is required for github auth"; exit 1; }
+            token=$(curl --fail-with-body --silent --show-error --retry 3 "${auth_headers[@]}" \
+              --request POST "$VAULT_URL/v1/auth/github/login" \
+              --data "$(jq -cn --arg token "$GITHUB_TOKEN_INPUT" '{token:$token}')" \
+              | jq --exit-status -r '.auth.client_token')
             ;;
           *)
-            echo "::error::Unsupported auth method: ${{ inputs.auth-method }}"
+            echo "::error::Unsupported auth method: $AUTH_METHOD"
             exit 1
             ;;
         esac
 
+        echo "::add-mask::$token"
+        echo "VAULT_TOKEN=$token" >> "$GITHUB_ENV"
+
     - name: Fetch secrets
       id: fetch
       shell: bash
+      env:
+        VAULT_URL: ${{ inputs.vault-url }}
+        VAULT_NAMESPACE: ${{ inputs.vault-namespace }}
+        SECRET_SPEC: ${{ inputs.secrets }}
+        EXPORT_ENV: ${{ inputs.export-env }}
+        EXPORT_OUTPUTS: ${{ inputs.export-outputs }}
       run: |
+        set -euo pipefail
         JSON="{}"
+        auth_headers=()
+        [[ -n "$VAULT_NAMESPACE" ]] && auth_headers+=(--header "X-Vault-Namespace: $VAULT_NAMESPACE")
+
+        write_env() {
+          local name="$1" value="$2" delimiter
+          delimiter="ghadelimiter_$(openssl rand -hex 16)"
+          {
+            printf '%s<<%s\n' "$name" "$delimiter"
+            printf '%s\n' "$value"
+            printf '%s\n' "$delimiter"
+          } >> "$GITHUB_ENV"
+        }
+
+        write_output() {
+          local name="$1" value="$2" delimiter
+          delimiter="ghadelimiter_$(openssl rand -hex 16)"
+          {
+            printf '%s<<%s\n' "$name" "$delimiter"
+            printf '%s\n' "$value"
+            printf '%s\n' "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+        }
 
         while IFS= read -r line; do
-          [ -z "$line" ] && continue
-
-          path_key=$(echo "$line" | cut -d'|' -f1 | xargs)
-          env_name=$(echo "$line" | cut -d'|' -f2 | xargs)
-          secret_path=$(echo "$path_key" | rsed 's/ [^ ]*$//' | xargs)
-          secret_key=$(echo "$path_key" | awk '{print $NF}')
-
-          value=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
-            "${{ inputs.vault-url }}/v1/${secret_path}" \
-            | jq -r ".data.data.${secret_key} // .data.${secret_key}")
-
-          echo "::add-mask::$value"
-
-          JSON=$(echo "$JSON" | jq --arg k "$env_name" --arg v "$value" '. + {($k): $v}')
-
-          if [ "${{ inputs.export-env }}" = "true" ]; then
-            echo "${env_name}=${value}" >> "$GITHUB_ENV"
+          [[ -z "${line//[[:space:]]/}" ]] && continue
+          if [[ "$line" != *"|"* ]]; then
+            echo "::error::Invalid secret specification: $line"
+            exit 1
           fi
+          path_key="${line%%|*}"
+          env_name="${line#*|}"
+          path_key="$(printf '%s' "$path_key" | xargs)"
+          env_name="$(printf '%s' "$env_name" | xargs)"
+          secret_path="${path_key% *}"
+          secret_key="${path_key##* }"
+          [[ "$secret_path" != "$path_key" && -n "$env_name" ]] || { echo "::error::Invalid secret specification: $line"; exit 1; }
+          [[ "$env_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Invalid environment name: $env_name"; exit 1; }
 
-          echo "${env_name}=${value}" >> "$GITHUB_OUTPUT"
+          value=$(curl --fail-with-body --silent --show-error --retry 3 "${auth_headers[@]}" \
+            --header "X-Vault-Token: $VAULT_TOKEN" "$VAULT_URL/v1/$secret_path" \
+            | jq --exit-status -r --arg key "$secret_key" '.data.data[$key] // .data[$key] // error("secret key not found")')
+          echo "::add-mask::$value"
+          JSON=$(jq -cn --argjson json "$JSON" --arg k "$env_name" --arg v "$value" '$json + {($k): $v}')
 
-        done <<< "${{ inputs.secrets }}"
+          [[ "$EXPORT_ENV" == "true" ]] && write_env "$env_name" "$value"
+          [[ "$EXPORT_OUTPUTS" == "true" ]] && write_output "$env_name" "$value"
+        done <<< "$SECRET_SPEC"
 
-        echo "secrets-json=$(echo "$JSON" | jq -c .)" >> "$GITHUB_OUTPUT"
+        write_output secrets-json "$(jq -c . <<< "$JSON")"

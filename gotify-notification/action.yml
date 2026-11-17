@@ -25,9 +25,23 @@ runs:
   steps:
     - name: Send Gotify notification
       shell: bash
+      env:
+        GOTIFY_URL: ${{ inputs.gotify-url }}
+        GOTIFY_TOKEN: ${{ inputs.gotify-token }}
+        GOTIFY_TITLE: ${{ inputs.title }}
+        GOTIFY_MESSAGE: ${{ inputs.message }}
+        GOTIFY_PRIORITY: ${{ inputs.priority }}
       run: |
-        curl -s -S -X POST \
-          "${{ inputs.gotify-url }}/message?token=${{ inputs.gotify-token }}" \
-          -F "title=${{ inputs.title }}" \
-          -F "message=${{ inputs.message }}" \
-          -F "priority=${{ inputs.priority }}"
+        set -euo pipefail
+        GOTIFY_URL="${GOTIFY_URL%/}"
+        [[ "$GOTIFY_PRIORITY" =~ ^[0-9]+$ && "$GOTIFY_PRIORITY" -le 10 ]] || {
+          echo "::error::priority must be an integer from 0 to 10"
+          exit 1
+        }
+        curl --fail-with-body --silent --show-error --retry 3 \
+          --request POST \
+          --url "$GOTIFY_URL/message" \
+          --header "X-Gotify-Key: $GOTIFY_TOKEN" \
+          --form-string "title=$GOTIFY_TITLE" \
+          --form-string "message=$GOTIFY_MESSAGE" \
+          --form-string "priority=$GOTIFY_PRIORITY"

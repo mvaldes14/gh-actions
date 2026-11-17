@@ -1,0 +1,19 @@
+name: PR Agent
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize, review_requested]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  pr-agent:
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: mvaldes14/gh-actions/.github/workflows/pr-agent.yml@v1
+    secrets:
+      BEDROCK_API_KEY: ${{ secrets.BEDROCK_API_KEY }}

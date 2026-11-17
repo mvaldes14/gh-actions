@@ -7,7 +7,7 @@ Two kinds of thing live here:
 - **Composite actions** (`<name>/action.yml`) — steps you drop into a job you already own.
 - **Reusable workflows** (`.github/workflows/<name>.yml`) — whole jobs you call with `uses:` at the job level. Reach for these when the work needs its own runner, a matrix, or several jobs.
 
-All third-party actions are pinned to commit SHAs with the version in a trailing comment. `.github/dependabot.yml` keeps them moving.
+All third-party actions are pinned to commit SHAs with the version in a trailing comment. `.github/dependabot.yml` keeps them moving. Releases use immutable `vX.Y.Z` tags; maintainers should move the major `v1` tag only after validation. Consumers needing maximum reproducibility should pin a release SHA.
 
 Ready-to-copy caller workflows live in [`examples/`](./examples).
 
@@ -115,7 +115,7 @@ Build a container image with Buildx and push it to a registry. Buildx gives laye
     password: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-`registry` defaults to `ghcr.io` and `username` to `github.actor`.
+`registry` defaults to `ghcr.io` and `username` to `github.actor`. Set `provenance: true` and/or `sbom: true` to publish build attestations.
 
 `tags` is a `docker/metadata-action` tag spec, one directive per line — not a comma-separated list of literal tags. The default covers branch, tag, PR, short SHA, and `latest` on the default branch. For a literal tag:
 
@@ -162,7 +162,7 @@ Send event notifications to a Gotify server.
 
 ### [vault-secrets](./vault-secrets)
 
-Pull secrets from HashiCorp Vault and export them as environment variables or outputs. Supports token, AppRole, and GitHub auth methods.
+Pull secrets from HashiCorp Vault and export them as environment variables. Supports token, AppRole, and GitHub auth methods, plus Vault namespaces. Individual outputs are disabled by default; set `export-outputs: true` when needed.
 
 **Usage:**
 
@@ -177,6 +177,7 @@ Pull secrets from HashiCorp Vault and export them as environment variables or ou
     secrets: |
       secret/data/myapp db_password | DB_PASSWORD
       secret/data/myapp api_key | API_KEY
+    export-outputs: false
 ```
 
 ### [golint](./golint)

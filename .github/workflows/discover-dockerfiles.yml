@@ -6,6 +6,8 @@
 # adds a project.
 name: Discover Dockerfiles
 
+permissions: {}
+
 on:
   workflow_call:
     inputs:
@@ -39,6 +41,7 @@ on:
 jobs:
   discover:
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     outputs:
       dirs: ${{ steps.find.outputs.dirs }}
       count: ${{ steps.find.outputs.count }}
